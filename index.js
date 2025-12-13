@@ -294,7 +294,7 @@ async function run() {
           });
         }
 
-        // If order already exists
+        // If order already exists payment
         return res.send({
           success: true,
           transactionId: session.payment_intent,
