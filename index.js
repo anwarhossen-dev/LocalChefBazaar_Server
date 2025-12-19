@@ -74,7 +74,7 @@ async function run() {
     const reviewsCollection = db.collection("reviews")
     const favouriteCollection = db.collection("favourites")
     const ordersCollection = db.collection("orders")
-    const paymentCollection = db.collection("payments")
+    const paymentsCollection = db.collection("payments")
     const contactCollection = db.collection("contacts")
     // ------------Reusable api---------
     // admin
@@ -428,6 +428,27 @@ async function run() {
       const result = await ordersCollection.insertOne(order);
       res.send(result);
     });
+
+  // GET order by ID
+app.get("/orders/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).send("Invalid order ID");
+    }
+
+    const order = await order.findById(id);
+    if (!order) return res.status(404).send("Order not found");
+
+    res.json(order);
+  } catch (err) {
+    console.error("Error fetching order:", err);
+    res.status(500).send("Internal server error");
+  }
+});
+
     // get users order
     app.get("/orders/by-user/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
@@ -454,14 +475,63 @@ async function run() {
       const result = await ordersCollection.updateOne({ _id: new ObjectId(id) }, { $set: { orderStatus: status } });
       res.send({ success: result.modifiedCount > 0 });
     });
+    // app.get("/admin/stats/ordersPending", async (req, res) => {
+    //   const count = await ordersCollection.countDocuments({ orderStatus: "pending" });
+    //   res.send({ pendingOrders: count });
+    // });
+    // app.get("/admin/stats/orderDelivered", async (req, res) => {
+    //   const count = await ordersCollection.countDocuments({ orderStatus: "delivered" });
+    //   res.send({ deliveredOrders: count });
+    // });
+
+     // -------------- Stats APIs ----------------
+
+    // Total Users
+    app.get("/admin/stats/totalUsers", async (req, res) => {
+      try {
+        const count = await usersCollection.countDocuments();
+        res.send({ totalUsers: count });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ totalUsers: 0 });
+      }
+    });
+
+    // Pending Orders
     app.get("/admin/stats/ordersPending", async (req, res) => {
-      const count = await ordersCollection.countDocuments({ orderStatus: "pending" });
-      res.send({ pendingOrders: count });
+      try {
+        const count = await ordersCollection.countDocuments({ orderStatus: "pending" });
+        res.send({ pendingOrders: count });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ pendingOrders: 0 });
+      }
     });
-    app.get("/admin/stats/orderDelivered", async (req, res) => {
-      const count = await ordersCollection.countDocuments({ orderStatus: "delivered" });
-      res.send({ deliveredOrders: count });
+
+    // Delivered Orders
+    app.get("/admin/stats/ordersDelivered", async (req, res) => {
+      try {
+        const count = await ordersCollection.countDocuments({ orderStatus: "delivered" });
+        res.send({ deliveredOrders: count });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ deliveredOrders: 0 });
+      }
     });
+
+    // Total Payments
+    app.get("/admin/stats/totalPayments", async (req, res) => {
+      try {
+        const result = await paymentsCollection.aggregate([
+          { $group: { _id: null, total: { $sum: "$amount" } } }
+        ]).toArray();
+        res.send({ totalPayments: result[0]?.total || 0 });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ totalPayments: 0 });
+      }
+    });
+
     // --------------------Payment api-----------------
     app.post("/order-payment-checkout", verifyFBToken, async (req, res) => {
       const info = req.body;
@@ -489,12 +559,27 @@ async function run() {
 
         customer_email: info.userEmail,
 
-        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+        success_url: `${process.env.CLIENT_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.CLIENT_DOMAIN}/dashboard/payment-cancelled`,
       });
 
       res.send({ url: session.url });
     });
+    // Express example
+    app.get('/payment-success', async (req, res) => {
+      const { sessionId } = req.query;
+      if (!sessionId) return res.status(400).json({ error: 'Session ID is required' });
+
+      try {
+        // Lookup payment session in Stripe or database
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        res.json({ success: true, session });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Could not verify payment' });
+      }
+    });
+
     app.patch("/order-payment-success", verifyFBToken, async (req, res) => {
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -547,10 +632,10 @@ async function run() {
       }
     });
 
-    app.get("/admin/stats/totalPayments", async (req, res) => {
-      const result = await paymentCollection.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]).toArray();
-      res.send({ totalPayments: result[0].total || 0 });
-    });
+    // app.get("/admin/stats/totalPayments", async (req, res) => {
+    //   const result = await paymentCollection.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]).toArray();
+    //   res.send({ totalPayments: result[0].total || 0 });
+    // });
     // --------Contact api----------
     app.post("/contact", async (req, res) => {
       const message = req.body;
