@@ -76,7 +76,6 @@ async function run() {
     const ordersCollection = db.collection("orders")
     const paymentCollection = db.collection("payments")
     const contactCollection = db.collection("contacts")
-
     // ------------Reusable api---------
     // admin
     const verifyAdmin = async (req, res, next) => {
@@ -85,16 +84,16 @@ async function run() {
         const user = await usersCollection.findOne({ email });
 
         if (!user) {
-          return res.status(404).send({ error: "User not Found" })
+          return res.status(404).send({ error: "User not Found" });
         }
         if (user.role !== "admin") {
-          return res.status(403).send({ error: "Admin Access denied" })
+          return res.status(403).send({ error: "Admin Access denied" });
         }
-        next()
+        next();
       } catch (error) {
-        res.status(500).send({ error: "Admin Verificatin failed" })
+        res.status(500).send({ error: "Admin Verificatin failed" });
       }
-    }
+    };
     // chef
     const verifyChef = async (req, res, next) => {
       try {
@@ -102,34 +101,34 @@ async function run() {
         const user = await usersCollection.findOne({ email });
 
         if (!user) {
-          return res.status(404).send({ error: "User not found" })
+          return res.status(404).send({ error: "User not found" });
         }
         if (user.role !== "chef") {
-          return res.status(403).send({ error: "Chef access denied" })
+          return res.status(403).send({ error: "Chef access denied" });
         }
-        next()
+        next();
       } catch (error) {
-        res.status(500).send({ error: "Chef verification failed " })
+        res.status(500).send({ error: "Chef verification failed " });
       }
-    }
+    };
     // Fraud
     const verifyFraud = async (req, res, next) => {
       try {
         const email = req.decoded_email;
         const user = await usersCollection.findOne({ email });
         if (!user) {
-          return res.status(404).send({ error: "User not found" })
+          return res.status(404).send({ error: "User not found" });
         }
         if (user.status === "fraud") {
-          return res.status(403).send({ error: "Fraud user - action blocked" })
+          return res.status(403).send({ error: "Fraud user - action blocked" });
         }
-        next()
+        next();
       } catch (error) {
-        res.status(500).send({ error: "Fraud verification fraud" })
+        res.status(500).send({ error: "Fraud verification fraud" });
       }
-    }
+    };
 
-
+    // ------------------Users API------------------
     app.post("/users", async (req, res) => {
       const user = req.body;
       user.role = "user";
@@ -145,45 +144,43 @@ async function run() {
       const result = await usersCollection.insertOne(user);
       res.send(result);
     });
-
-
     // get all users on frontend
     app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
       const allUsers = await usersCollection.find().sort({ createdAt: -1 }).toArray();
-      res.send(allUsers)
-    })
+      res.send(allUsers);
+    });
     // role based access
     app.get("/users/:email/role", async (req, res) => {
       const email = req.params.email;
-      console.log(email)
-      const user = await usersCollection.findOne({ email });
-      console.log(user)
+      const query = { email: email };
+      const user = await usersCollection.findOne(query);
       res.send({ role: user?.role });
     });
-    // updated user status 
+    // updated user status
     app.patch("/users/fraud/:email", verifyFBToken, verifyAdmin, async (req, res) => {
       const email = req.params.email;
-      const result = await usersCollection.updateOne(
-        { email },
-        { $set: { status: "fraud" } }
-      )
+      const result = await usersCollection.updateOne({ email }, { $set: { status: "fraud" } });
 
       if (result.modifiedCount > 0) {
-        return res.send({ success: true })
+        return res.send({ success: true });
       }
 
-      res.send({ success: false })
-    })
+      res.send({ success: false });
+    });
 
     // showing users on my profile page on frontend
     app.get("/users/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       if (req.decoded_email !== email) {
-        return res.status(403).send({ error: "Access Denied" })
+        return res.status(403).send({ error: "Access Denied" });
       }
       const user = await usersCollection.findOne({ email });
       if (!user) return res.status(404).send({ error: "User not found" });
       res.send(user);
+    });
+    app.get("/admin/stats/totalUsers", async (req, res) => {
+      const count = await usersCollection.countDocuments();
+      res.send({ totalUsers: count });
     });
 
     // ------------------request api------------------
@@ -238,71 +235,64 @@ async function run() {
 
     // ---------------Meals api---------------
 
-    app.post("/meals", verifyFBToken, verifyFraud, verifyChef, async (req, res) => { //  
+    app.post("/meals", verifyFBToken, verifyFraud, verifyChef, async (req, res) => {
       try {
         const meal = req.body;
 
         if (req.decoded_email !== meal.userEmail) {
-          return res.status(403).send({ error: "Access denied" })
+          return res.status(403).send({ error: "Access denied" });
         }
         meal.createdAt = new Date();
 
-        const result = await mealsCollection.insertOne(meal)
-        res.send({ success: true, result })
+        const result = await mealsCollection.insertOne(meal);
+        res.send({ success: true, result });
       } catch (error) {
-        res.status(500).send({ success: false, error: "Failed to creat meal" })
+        res.status(500).send({ success: false, error: "Failed to creat meal" });
       }
-    })
+    });
     // get meals to show on home page
     app.get("/leatestMeals", async (req, res) => {
       const meals = await mealsCollection.find().sort({ createdAt: -1 }).limit(8).toArray();
-      res.send(meals)
-    })
+      res.send(meals);
+    });
+    // Show meals Pagination
     app.get("/meals", async (req, res) => {
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 10;
       const skip = (page - 1) * limit;
       const total = await mealsCollection.countDocuments();
-      const meals = await mealsCollection
-        .find()
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .toArray();
-      res.send({ total, page, limit, meals })
-    })
+      const meals = await mealsCollection.find().sort({ createdAt: -1 }).skip(skip).limit(limit).toArray();
+      res.send({ total, page, limit, meals });
+    });
     // showing meal details on frontend as per id
-    app.get("/meals/:id", async (req, res) => {
+    app.get("/meals/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const result = await mealsCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result)
-    })
-    // get meals by email 
+      res.send(result);
+    });
+    // get meals by email
     app.get("/meals/by-email/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
 
       if (req.decoded_email !== email) {
-        return res.status(403).send({ error: "Access Denied" })
+        return res.status(403).send({ error: "Access Denied" });
       }
-      const meals = await mealsCollection.find({ userEmail: email }).sort({ createdAt: -1 }).toArray()
-      res.send(meals)
-    })
+      const meals = await mealsCollection.find({ userEmail: email }).sort({ createdAt: -1 }).toArray();
+      res.send(meals);
+    });
     // delete meals
     app.delete("/meals/:id", verifyFBToken, verifyChef, async (req, res) => {
       const id = req.params.id;
-      const result = await mealsCollection.deleteOne({ _id: new ObjectId(id) })
-      res.send(result)
-    })
+      const result = await mealsCollection.deleteOne({ _id: new ObjectId(id) });
+      res.send(result);
+    });
     // update meals information by id
     app.patch("/meals/:id", verifyFBToken, verifyChef, async (req, res) => {
       const id = req.params.id;
       const updatedData = req.body;
-      const result = await mealsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: updatedData }
-      )
-      res.send({ success: result.modifiedCount > 0 })
-    })
+      const result = await mealsCollection.updateOne({ _id: new ObjectId(id) }, { $set: updatedData });
+      res.send({ success: result.modifiedCount > 0 });
+    });
     // ---------Reviews api-----------------
     app.post("/reviews", verifyFBToken, verifyFraud, async (req, res) => {
       const review = req.body;
@@ -321,10 +311,10 @@ async function run() {
       const total = allReviews.reduce((sum, r) => sum + Number(r.rating || 0), 0);
       const avgRating = total / allReviews.length;
       if (!ObjectId.isValid(review.foodId)) {
-        return res.status(400).send({ success: false, message: "Invalid foodId formate" })
+        return res.status(400).send({ success: false, message: "Invalid foodId formate" });
       }
-      const newFoodId = new ObjectId(review.foodId)
-      await mealsCollection.updateOne({ _id: newFoodId }, { $set: { rating: Number(avgRating.toFixed(2)) } })
+      const newFoodId = new ObjectId(review.foodId);
+      await mealsCollection.updateOne({ _id: newFoodId }, { $set: { rating: Number(avgRating.toFixed(2)) } });
       res.send({
         success: true,
         insertedId: result.insertedId,
@@ -335,41 +325,36 @@ async function run() {
       const reviews = await reviewsCollection.find({ foodId: mealId }).toArray();
       res.send(reviews);
     });
-    app.get("/reviews", verifyFBToken, async (req, res) => {
+    app.get("/reviews", async (req, res) => {
       const review = await reviewsCollection.find().sort({ date: -1 }).limit(10).toArray();
-      res.send(review)
-    })
+      res.send(review);
+    });
     app.get("/reviews/by-email/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       if (req.decoded_email !== email) {
-        return res.status(403).send({ error: "Access Denied" })
+        return res.status(403).send({ error: "Access Denied" });
       }
       const result = await reviewsCollection.find({ reviewerEmail: email }).toArray();
       res.send(result);
     });
-    app.delete('/reviews/:id', verifyFBToken, async (req, res) => {
+    app.delete("/reviews/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
-      const review = await reviewsCollection.findOne({ _id: new ObjectId(id) })
-      const deleteResult = await reviewsCollection.deleteOne({ _id: new ObjectId(id) })
+      const review = await reviewsCollection.findOne({ _id: new ObjectId(id) });
+      const deleteResult = await reviewsCollection.deleteOne({ _id: new ObjectId(id) });
 
-      const givenReview = await reviewsCollection.find({ foodId: review.foodId }).toArray()
+      const givenReview = await reviewsCollection.find({ foodId: review.foodId }).toArray();
       let newRating = 0;
       if (givenReview.length > 0) {
-        const total = givenReview.reduce(
-          (sum, r) => sum + Number(r.rating || 0), 0
-        )
-        newRating = Number((total / givenReview.length).toFixed(3))
+        const total = givenReview.reduce((sum, r) => sum + Number(r.rating || 0), 0);
+        newRating = Number((total / givenReview.length).toFixed(3));
       }
 
-      await mealsCollection.updateOne(
-        { _id: new ObjectId(review.foodId) },
-        { $set: { rating: newRating } }
-      )
+      await mealsCollection.updateOne({ _id: new ObjectId(review.foodId) }, { $set: { rating: newRating } });
       res.send({
         success: deleteResult.deletedCount > 0,
         message: "Review deleted Successfully",
-      })
-    })
+      });
+    });
     app.patch("/reviews/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const { rating, comment } = req.body;
@@ -403,7 +388,6 @@ async function run() {
       });
     });
 
-
     // --------fav api ---------
     app.post("/favorites", verifyFBToken, verifyFraud, async (req, res) => {
       const favourite = req.body;
@@ -411,51 +395,49 @@ async function run() {
       const exists = await favouriteCollection.findOne({
         userEmail: favourite.userEmail,
         mealId: favourite.mealId,
-      })
+      });
       if (exists) {
         return res.send({
           success: false,
-          message: "Already added to favorite"
-        })
+          message: "Already added to favorite",
+        });
       }
       favourite.addedTime = new Date();
-      const result = await favouriteCollection.insertOne(favourite)
+      const result = await favouriteCollection.insertOne(favourite);
       res.send({
         success: true,
         insertedId: result.insertedIdz,
-      })
-    })
+      });
+    });
     app.get("/favorites/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       const result = await favouriteCollection.find({ userEmail: email }).toArray();
-      res.send(result)
-    })
-    app.delete("/favourites/:id", async (req, res) => {
+      res.send(result);
+    });
+    app.delete("/favourites/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const result = await favouriteCollection.deleteOne({ _id: new ObjectId(id) });
-      res.send(result)
-    })
-
+      res.send(result);
+    });
     // -----------------Order api----------------
     app.post("/orders", verifyFBToken, verifyFraud, async (req, res) => {
       const order = req.body;
       order.orderTime = new Date().toISOString();
 
-      order.orderStatus = "pending",
-        order.paymentStatus = "pending"
-      const result = await ordersCollection.insertOne(order)
-      res.send(result)
-    })
+      (order.orderStatus = "pending"), (order.paymentStatus = "pending");
+      const result = await ordersCollection.insertOne(order);
+      res.send(result);
+    });
     // get users order
-    app.get("/orders/by-user/:email", async (req, res) => {
+    app.get("/orders/by-user/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       if (email !== req.params.email) {
-        return res.status(403).send({ message: "Forbidden Access" })
+        return res.status(403).send({ message: "Forbidden Access" });
       }
-      const query = { userEmail: email }
-      const result = await ordersCollection.find(query).sort({ orderTime: -1 }).toArray()
-      res.send(result)
-    })
+      const query = { userEmail: email };
+      const result = await ordersCollection.find(query).sort({ orderTime: -1 }).toArray();
+      res.send(result);
+    });
     // get the order bessed on chefId
     app.get("/orders/by-chef/:chefEmail", verifyFBToken, verifyChef, async (req, res) => {
       const chefEmail = req.params.chefEmail;
@@ -467,16 +449,21 @@ async function run() {
       const { status } = req.body;
       const allowed = ["pending", "accepted", "cancelled", "delivered"];
       if (!allowed.includes(status)) {
-        return res.status(400).send({ error: "Invalid status" })
+        return res.status(400).send({ error: "Invalid status" });
       }
-      const result = await ordersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { orderStatus: status } }
-      )
-      res.send({ success: result.modifiedCount > 0 })
-    })
+      const result = await ordersCollection.updateOne({ _id: new ObjectId(id) }, { $set: { orderStatus: status } });
+      res.send({ success: result.modifiedCount > 0 });
+    });
+    app.get("/admin/stats/ordersPending", async (req, res) => {
+      const count = await ordersCollection.countDocuments({ orderStatus: "pending" });
+      res.send({ pendingOrders: count });
+    });
+    app.get("/admin/stats/orderDelivered", async (req, res) => {
+      const count = await ordersCollection.countDocuments({ orderStatus: "delivered" });
+      res.send({ deliveredOrders: count });
+    });
     // --------------------Payment api-----------------
-    app.post("/order-payment-checkout", async (req, res) => {
+    app.post("/order-payment-checkout", verifyFBToken, async (req, res) => {
       const info = req.body;
       const amount = parseInt(info.price) * 100;
 
@@ -508,7 +495,7 @@ async function run() {
 
       res.send({ url: session.url });
     });
-    app.patch("/order-payment-success", async (req, res) => {
+    app.patch("/order-payment-success", verifyFBToken, async (req, res) => {
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       const transactionId = session.payment_intent;
@@ -524,7 +511,7 @@ async function run() {
               paidAt: new Date(),
             },
           }
-        )
+        );
         const payment = {
           amount: session.amount_total / 100,
           currency: session.currency,
@@ -533,34 +520,47 @@ async function run() {
           mealName: session.metadata.mealName,
           transactionId,
           paymentStatus: session.payment_status,
-          paidAt: new Date()
-        }
+          paidAt: new Date(),
+        };
 
-        await paymentCollection.updateOne(
-          { transactionId },
-          { $setOnInsert: payment },
-          { upsert: true }
-        )
-        return res.send({ success: true })
+        await paymentCollection.updateOne({ transactionId }, { $setOnInsert: payment }, { upsert: true });
+        return res.send({ success: true });
       }
-      res.send({ success: false })
-    })
+      res.send({ success: false });
+    });
+    const { ObjectId } = require("mongodb");
+
+    // Delete an order by ID
+    app.delete("/orders/:id", verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await ordersCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount > 0) {
+          res.status(200).send({ message: "Order deleted", deletedCount: result.deletedCount });
+        } else {
+          res.status(404).send({ message: "Order not found" });
+        }
+      } catch (error) {
+        console.error("Delete order error:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
     app.get("/admin/stats/totalPayments", async (req, res) => {
-      const result = await paymentCollection.aggregate([
-        { $group: { _id: null, total: { $sum: "$amount" } } }
-      ]).toArray();
-      res.send({ totalPayments: result[0].total || 0 })
-    })
+      const result = await paymentCollection.aggregate([{ $group: { _id: null, total: { $sum: "$amount" } } }]).toArray();
+      res.send({ totalPayments: result[0].total || 0 });
+    });
     // --------Contact api----------
     app.post("/contact", async (req, res) => {
       const message = req.body;
       message.createdAt = new Date();
       const result = await contactCollection.insertOne(message);
       if (result.insertedId) {
-        return res.send({ success: true })
+        return res.send({ success: true });
       }
-      res.send({ success: false })
-    })
+      res.send({ success: false });
+    });
 
     // //payment method
     // app.post("/create-checkout-session", async (req, res) => {
@@ -716,12 +716,13 @@ async function run() {
 
 
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
+
     //await client.close();
   }
 }
