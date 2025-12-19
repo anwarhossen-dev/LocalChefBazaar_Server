@@ -429,25 +429,32 @@ async function run() {
       res.send(result);
     });
 
-  // GET order by ID
-app.get("/orders/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
+    // // GET order by ID
+    // app.get("/orders/:id", async (req, res) => {
+    //   try {
+    //     const { id } = req.params;
 
-    // Validate MongoDB ObjectId
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).send("Invalid order ID");
-    }
+    //     // Validate MongoDB ObjectId
+    //     if (!mongoose.Types.ObjectId.isValid(id)) {
+    //       return res.status(400).send("Invalid order ID");
+    //     }
 
-    const order = await order.findById(id);
-    if (!order) return res.status(404).send("Order not found");
+    //     const order = await order.findById(id);
+    //     if (!order) return res.status(404).send("Order not found");
 
-    res.json(order);
-  } catch (err) {
-    console.error("Error fetching order:", err);
-    res.status(500).send("Internal server error");
-  }
+    //     res.json(order);
+    //   } catch (err) {
+    //     console.error("Error fetching order:", err);
+    //     res.status(500).send("Internal server error");
+    //   }
+    // });
+
+    app.get("/orders/:id", async (req, res) => {
+  const order = await order.findById(req.params.id);
+  if (!order) return res.status(404).send("Order not found");
+  res.json(order);
 });
+
 
     // get users order
     app.get("/orders/by-user/:email", verifyFBToken, async (req, res) => {
@@ -484,7 +491,7 @@ app.get("/orders/:id", async (req, res) => {
     //   res.send({ deliveredOrders: count });
     // });
 
-     // -------------- Stats APIs ----------------
+    // -------------- Stats APIs ----------------
 
     // Total Users
     app.get("/admin/stats/totalUsers", async (req, res) => {
@@ -608,7 +615,7 @@ app.get("/orders/:id", async (req, res) => {
           paidAt: new Date(),
         };
 
-        await paymentCollection.updateOne({ transactionId }, { $setOnInsert: payment }, { upsert: true });
+        await paymentsCollection.updateOne({ transactionId }, { $setOnInsert: payment }, { upsert: true });
         return res.send({ success: true });
       }
       res.send({ success: false });
@@ -646,157 +653,6 @@ app.get("/orders/:id", async (req, res) => {
       }
       res.send({ success: false });
     });
-
-    // //payment method
-    // app.post("/create-checkout-session", async (req, res) => {
-    //   try {
-    //     const {
-    //       mealId,
-    //       foodName,
-    //       description,
-    //       image,
-    //       price,
-    //       quantity,
-    //       customer,
-    //       address,
-    //     } = req.body;
-
-    //     if (!mealId || !price || !customer?.email) {
-    //       return res.status(400).json({ error: "Invalid payment data" });
-    //     }
-
-    //     const session = await stripe.checkout.sessions.create({
-    //       payment_method_types: ["card"],
-    //       mode: "payment",
-    //       customer_email: customer.email,
-
-    //       line_items: [
-    //         {
-    //           price_data: {
-    //             currency: "usd",
-    //             product_data: {
-    //               name: foodName,
-    //               description,
-    //               images: image ? [image] : [],
-    //             },
-    //             unit_amount: Math.round(price * 100),
-    //           },
-    //           quantity,
-    //         },
-    //       ],
-
-    //       metadata: {
-    //         mealId,
-    //         quantity,
-    //         customerEmail: customer.email,
-    //         address,
-    //       },
-
-    //       success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-    //       cancel_url: `${process.env.CLIENT_DOMAIN}/order/${mealId}`,
-    //     });
-
-    //     res.send({ url: session.url });
-    //   } catch (err) {
-    //     console.error("Stripe Error:", err.message);
-    //     res.status(500).json({ error: err.message });
-    //   }
-    // });
-
-
-    // app.get("/payment-success", async (req, res) => {
-    //   try {
-    //     const { session_id } = req.query
-
-    //     if (!session_id) {
-    //       return res.status(400).json({ error: "Session ID missing" })
-    //     }
-
-    //     const session = await stripe.checkout.sessions.retrieve(session_id)
-
-    //     if (session.payment_status !== "paid") {
-    //       return res.status(400).json({ error: "Payment not completed" })
-    //     }
-
-    //     const existingOrder = await ordersCollection.findOne({
-    //       transactionId: session.payment_intent,
-    //     })
-
-    //     if (existingOrder) {
-    //       return res.json({ success: true })
-    //     }
-
-    //     const meal = await mealsCollection.findOne({
-    //       _id: new ObjectId(session.metadata.mealId),
-    //     })
-
-    //     const order = {
-    //       mealId: session.metadata.mealId,
-    //       transactionId: session.payment_intent,
-    //       customerEmail: session.metadata.customerEmail,
-    //       foodName: meal.foodName,
-    //       chefName: meal.chefName,
-    //       chefId: meal.chefId,
-    //       quantity: Number(session.metadata.quantity),
-    //       price: session.amount_total / 100,
-    //       image: meal.image,
-    //       address: session.metadata.address,
-    //       paymentStatus: "paid",
-    //       orderStatus: "pending",
-    //       orderTime: new Date(),
-    //     }
-
-    //     await ordersCollection.insertOne(order)
-
-    //     await mealsCollection.updateOne(
-    //       { _id: meal._id },
-    //       { $inc: { quantity: -order.quantity } }
-    //     )
-
-    //     res.json({ success: true })
-    //   } catch (err) {
-    //     res.status(500).json({ error: "Payment failed" })
-    //   }
-    // })
-
-    // app.post('/orders', async (req, res) => {
-    //   const ordersData = req.body
-    //   console.log(ordersData)
-    //   const result = await ordersCollection.insertOne(ordersData)
-    //   res.send(result)
-    // })
-
-    // app.get('/my-orders/:email', async (req, res) => {
-    //   const email = req.params.email
-    //   const result = await ordersCollection.find({ customer: email }).toArray()
-    //   res.send(result)
-    // })
-
-    // // // get all orders for a chef by email
-    // // app.get('/manage-orders/:email', async (req, res) => {
-    // //   const email = req.params.email
-
-    // //   const result = await ordersCollection
-    // //     .find({ 'chef.email': email })
-    // //     .toArray()
-    // //   res.send(result)
-    // // })
-
-    // app.get('/orders', async (req, res) => {
-    //   const email = req.query.email;
-    //   const result = await ordersCollection.find({ customer: email }).toArray();
-    //   res.send(result);
-    // });
-
-    // app.patch('/orders/:id', async (req, res) => {
-    //   const { id } = req.params;
-    //   const { orderStatus } = req.body;
-    //   const result = await ordersCollection.updateOne(
-    //     { _id: new ObjectId(id) },
-    //     { $set: { orderStatus } }
-    //   );
-    //   res.send(result);
-    // });
 
 
 
