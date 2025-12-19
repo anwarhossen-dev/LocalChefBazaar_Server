@@ -5,35 +5,36 @@ const express = require('express')
 const cors = require('cors')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const admin = require('firebase-admin')
+const serviceAccount = require("./serviceAccountKey.json");
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 
 const port = process.env.PORT || 3000
 const crypto = require("crypto");
 
-const serviceAccount = JSON.parse(decoded)
+//const serviceAccount = JSON.parse(decoded)
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 })
 
 
 const verifyFBToken = async (req, res, next) => {
-    const token = req.headers.authorization;
+  const token = req.headers.authorization;
 
-    if (!token) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
+  if (!token) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
 
-    try {
-        const idToken = token.split(' ')[1];
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        console.log('decoded in the token', decoded);
-        req.decoded_email = decoded.email;
-        next();
-    }
-    catch (err) {
-        return res.status(401).send({ message: 'unauthorized access' })
-    }
+  try {
+    const idToken = token.split(' ')[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log('decoded in the token', decoded);
+    req.decoded_email = decoded.email;
+    next();
+  }
+  catch (err) {
+    return res.status(401).send({ message: 'unauthorized access' })
+  }
 
 
 }
@@ -66,12 +67,15 @@ let mealsCollection;
 async function run() {
   try {
 
-    const db = client.db("local-chef-bazarDB");
+    const db = client.db("LocalChefBazzaarBD");
     const usersCollection = db.collection("users");
     const requestsCollection = db.collection("requests");
     const mealsCollection = db.collection("meals")
     const reviewsCollection = db.collection("reviews")
     const favouriteCollection = db.collection("favourites")
+    const ordersCollection = db.collection("orders")
+    const paymentCollection = db.collection("payments")
+    const contactCollection = db.collection("contacts")
 
     // ------------Reusable api---------
     // admin
@@ -151,7 +155,9 @@ async function run() {
     // role based access
     app.get("/users/:email/role", async (req, res) => {
       const email = req.params.email;
+      console.log(email)
       const user = await usersCollection.findOne({ email });
+      console.log(user)
       res.send({ role: user?.role });
     });
     // updated user status 
@@ -232,7 +238,7 @@ async function run() {
 
     // ---------------Meals api---------------
 
-    app.post("/meals", verifyFBToken, verifyFraud, verifyChef, async (req, res) => {
+    app.post("/meals", verifyFBToken, verifyFraud, verifyChef, async (req, res) => { //  
       try {
         const meal = req.body;
 
@@ -430,157 +436,282 @@ async function run() {
       res.send(result)
     })
 
+    // -----------------Order api----------------
+    app.post("/orders", verifyFBToken, verifyFraud, async (req, res) => {
+      const order = req.body;
+      order.orderTime = new Date().toISOString();
 
-    //payment method
-    app.post("/create-checkout-session", async (req, res) => {
-      try {
-        const {
-          mealId,
-          foodName,
-          description,
-          image,
-          price,
-          quantity,
-          customer,
-          address,
-        } = req.body;
-
-        if (!mealId || !price || !customer?.email) {
-          return res.status(400).json({ error: "Invalid payment data" });
-        }
-
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ["card"],
-          mode: "payment",
-          customer_email: customer.email,
-
-          line_items: [
-            {
-              price_data: {
-                currency: "usd",
-                product_data: {
-                  name: foodName,
-                  description,
-                  images: image ? [image] : [],
-                },
-                unit_amount: Math.round(price * 100),
-              },
-              quantity,
-            },
-          ],
-
-          metadata: {
-            mealId,
-            quantity,
-            customerEmail: customer.email,
-            address,
-          },
-
-          success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.CLIENT_DOMAIN}/order/${mealId}`,
-        });
-
-        res.send({ url: session.url });
-      } catch (err) {
-        console.error("Stripe Error:", err.message);
-        res.status(500).json({ error: err.message });
+      order.orderStatus = "pending",
+        order.paymentStatus = "pending"
+      const result = await ordersCollection.insertOne(order)
+      res.send(result)
+    })
+    // get users order
+    app.get("/orders/by-user/:email", async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.params.email) {
+        return res.status(403).send({ message: "Forbidden Access" })
       }
+      const query = { userEmail: email }
+      const result = await ordersCollection.find(query).sort({ orderTime: -1 }).toArray()
+      res.send(result)
+    })
+    // get the order bessed on chefId
+    app.get("/orders/by-chef/:chefEmail", verifyFBToken, verifyChef, async (req, res) => {
+      const chefEmail = req.params.chefEmail;
+      const orders = await ordersCollection.find({ chefEmail }).sort({ orderTime: -1 }).toArray();
+      res.send(orders);
     });
-
-
-    app.get("/payment-success", async (req, res) => {
-      try {
-        const { session_id } = req.query
-
-        if (!session_id) {
-          return res.status(400).json({ error: "Session ID missing" })
-        }
-
-        const session = await stripe.checkout.sessions.retrieve(session_id)
-
-        if (session.payment_status !== "paid") {
-          return res.status(400).json({ error: "Payment not completed" })
-        }
-
-        const existingOrder = await ordersCollection.findOne({
-          transactionId: session.payment_intent,
-        })
-
-        if (existingOrder) {
-          return res.json({ success: true })
-        }
-
-        const meal = await mealsCollection.findOne({
-          _id: new ObjectId(session.metadata.mealId),
-        })
-
-        const order = {
-          mealId: session.metadata.mealId,
-          transactionId: session.payment_intent,
-          customerEmail: session.metadata.customerEmail,
-          foodName: meal.foodName,
-          chefName: meal.chefName,
-          chefId: meal.chefId,
-          quantity: Number(session.metadata.quantity),
-          price: session.amount_total / 100,
-          image: meal.image,
-          address: session.metadata.address,
-          paymentStatus: "paid",
-          orderStatus: "pending",
-          orderTime: new Date(),
-        }
-
-        await ordersCollection.insertOne(order)
-
-        await mealsCollection.updateOne(
-          { _id: meal._id },
-          { $inc: { quantity: -order.quantity } }
-        )
-
-        res.json({ success: true })
-      } catch (err) {
-        res.status(500).json({ error: "Payment failed" })
+    app.patch("/orders/update/:id", verifyFBToken, verifyChef, async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const allowed = ["pending", "accepted", "cancelled", "delivered"];
+      if (!allowed.includes(status)) {
+        return res.status(400).send({ error: "Invalid status" })
       }
+      const result = await ordersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { orderStatus: status } }
+      )
+      res.send({ success: result.modifiedCount > 0 })
+    })
+    // --------------------Payment api-----------------
+    app.post("/order-payment-checkout", async (req, res) => {
+      const info = req.body;
+      const amount = parseInt(info.price) * 100;
+
+      const session = await stripe.checkout.sessions.create({
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              unit_amount: amount,
+              product_data: {
+                name: `Payment for ${info.mealName}`,
+              },
+            },
+            quantity: info.quantity,
+          },
+        ],
+        mode: "payment",
+
+        metadata: {
+          orderId: info.orderId,
+          mealName: info.mealName,
+        },
+
+        customer_email: info.userEmail,
+
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+      });
+
+      res.send({ url: session.url });
+    });
+    app.patch("/order-payment-success", async (req, res) => {
+      const sessionId = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(sessionId);
+      const transactionId = session.payment_intent;
+      if (session.payment_status === "paid") {
+        const orderId = session.metadata.orderId;
+
+        await ordersCollection.updateOne(
+          { _id: new ObjectId(orderId) },
+          {
+            $set: {
+              paymentStatus: "paid",
+              transactionId,
+              paidAt: new Date(),
+            },
+          }
+        )
+        const payment = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          userEmail: session.customer_email,
+          orderId,
+          mealName: session.metadata.mealName,
+          transactionId,
+          paymentStatus: session.payment_status,
+          paidAt: new Date()
+        }
+
+        await paymentCollection.updateOne(
+          { transactionId },
+          { $setOnInsert: payment },
+          { upsert: true }
+        )
+        return res.send({ success: true })
+      }
+      res.send({ success: false })
+    })
+    app.get("/admin/stats/totalPayments", async (req, res) => {
+      const result = await paymentCollection.aggregate([
+        { $group: { _id: null, total: { $sum: "$amount" } } }
+      ]).toArray();
+      res.send({ totalPayments: result[0].total || 0 })
+    })
+    // --------Contact api----------
+    app.post("/contact", async (req, res) => {
+      const message = req.body;
+      message.createdAt = new Date();
+      const result = await contactCollection.insertOne(message);
+      if (result.insertedId) {
+        return res.send({ success: true })
+      }
+      res.send({ success: false })
     })
 
-    app.post('/orders', async (req, res) => {
-      const ordersData = req.body
-      console.log(ordersData)
-      const result = await ordersCollection.insertOne(ordersData)
-      res.send(result)
-    })
+    // //payment method
+    // app.post("/create-checkout-session", async (req, res) => {
+    //   try {
+    //     const {
+    //       mealId,
+    //       foodName,
+    //       description,
+    //       image,
+    //       price,
+    //       quantity,
+    //       customer,
+    //       address,
+    //     } = req.body;
 
-    app.get('/my-orders/:email', async (req, res) => {
-      const email = req.params.email
-      const result = await ordersCollection.find({ customer: email }).toArray()
-      res.send(result)
-    })
+    //     if (!mealId || !price || !customer?.email) {
+    //       return res.status(400).json({ error: "Invalid payment data" });
+    //     }
 
-    // // get all orders for a chef by email
-    // app.get('/manage-orders/:email', async (req, res) => {
-    //   const email = req.params.email
+    //     const session = await stripe.checkout.sessions.create({
+    //       payment_method_types: ["card"],
+    //       mode: "payment",
+    //       customer_email: customer.email,
 
-    //   const result = await ordersCollection
-    //     .find({ 'chef.email': email })
-    //     .toArray()
+    //       line_items: [
+    //         {
+    //           price_data: {
+    //             currency: "usd",
+    //             product_data: {
+    //               name: foodName,
+    //               description,
+    //               images: image ? [image] : [],
+    //             },
+    //             unit_amount: Math.round(price * 100),
+    //           },
+    //           quantity,
+    //         },
+    //       ],
+
+    //       metadata: {
+    //         mealId,
+    //         quantity,
+    //         customerEmail: customer.email,
+    //         address,
+    //       },
+
+    //       success_url: `${process.env.CLIENT_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    //       cancel_url: `${process.env.CLIENT_DOMAIN}/order/${mealId}`,
+    //     });
+
+    //     res.send({ url: session.url });
+    //   } catch (err) {
+    //     console.error("Stripe Error:", err.message);
+    //     res.status(500).json({ error: err.message });
+    //   }
+    // });
+
+
+    // app.get("/payment-success", async (req, res) => {
+    //   try {
+    //     const { session_id } = req.query
+
+    //     if (!session_id) {
+    //       return res.status(400).json({ error: "Session ID missing" })
+    //     }
+
+    //     const session = await stripe.checkout.sessions.retrieve(session_id)
+
+    //     if (session.payment_status !== "paid") {
+    //       return res.status(400).json({ error: "Payment not completed" })
+    //     }
+
+    //     const existingOrder = await ordersCollection.findOne({
+    //       transactionId: session.payment_intent,
+    //     })
+
+    //     if (existingOrder) {
+    //       return res.json({ success: true })
+    //     }
+
+    //     const meal = await mealsCollection.findOne({
+    //       _id: new ObjectId(session.metadata.mealId),
+    //     })
+
+    //     const order = {
+    //       mealId: session.metadata.mealId,
+    //       transactionId: session.payment_intent,
+    //       customerEmail: session.metadata.customerEmail,
+    //       foodName: meal.foodName,
+    //       chefName: meal.chefName,
+    //       chefId: meal.chefId,
+    //       quantity: Number(session.metadata.quantity),
+    //       price: session.amount_total / 100,
+    //       image: meal.image,
+    //       address: session.metadata.address,
+    //       paymentStatus: "paid",
+    //       orderStatus: "pending",
+    //       orderTime: new Date(),
+    //     }
+
+    //     await ordersCollection.insertOne(order)
+
+    //     await mealsCollection.updateOne(
+    //       { _id: meal._id },
+    //       { $inc: { quantity: -order.quantity } }
+    //     )
+
+    //     res.json({ success: true })
+    //   } catch (err) {
+    //     res.status(500).json({ error: "Payment failed" })
+    //   }
+    // })
+
+    // app.post('/orders', async (req, res) => {
+    //   const ordersData = req.body
+    //   console.log(ordersData)
+    //   const result = await ordersCollection.insertOne(ordersData)
     //   res.send(result)
     // })
 
-    app.get('/orders', async (req, res) => {
-      const email = req.query.email;
-      const result = await ordersCollection.find({ customer: email }).toArray();
-      res.send(result);
-    });
+    // app.get('/my-orders/:email', async (req, res) => {
+    //   const email = req.params.email
+    //   const result = await ordersCollection.find({ customer: email }).toArray()
+    //   res.send(result)
+    // })
 
-    app.patch('/orders/:id', async (req, res) => {
-      const { id } = req.params;
-      const { orderStatus } = req.body;
-      const result = await ordersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { orderStatus } }
-      );
-      res.send(result);
-    });
+    // // // get all orders for a chef by email
+    // // app.get('/manage-orders/:email', async (req, res) => {
+    // //   const email = req.params.email
+
+    // //   const result = await ordersCollection
+    // //     .find({ 'chef.email': email })
+    // //     .toArray()
+    // //   res.send(result)
+    // // })
+
+    // app.get('/orders', async (req, res) => {
+    //   const email = req.query.email;
+    //   const result = await ordersCollection.find({ customer: email }).toArray();
+    //   res.send(result);
+    // });
+
+    // app.patch('/orders/:id', async (req, res) => {
+    //   const { id } = req.params;
+    //   const { orderStatus } = req.body;
+    //   const result = await ordersCollection.updateOne(
+    //     { _id: new ObjectId(id) },
+    //     { $set: { orderStatus } }
+    //   );
+    //   res.send(result);
+    // });
 
 
 
@@ -604,265 +735,3 @@ app.get('/', (req, res) => {
 app.listen(port, () => {
   console.log(`Server is running on port ${port}`)
 })
-
-
-// require('dotenv').config()
-// const express = require('express')
-// const cors = require('cors')
-// const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
-// const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb')
-
-// /* =====================
-//    Express Setup
-// ===================== */
-// const app = express()
-// const port = process.env.PORT || 3000
-
-// app.use(cors({ origin: process.env.CLIENT_DOMAIN, credentials: true }))
-// app.use(express.json())
-
-// /* =====================
-//    MongoDB Setup
-// ===================== */
-// const uri = `mongodb+srv://${process.env.use_Name}:${process.env.user_Pass}@allunityit.looszdp.mongodb.net/?appName=AllUnityIt`;
-// const client = new MongoClient(uri, {
-//   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
-// })
-
-// let usersCollection, mealsCollection, ordersCollection, reviewsCollection, favoritesCollection, requestsCollection
-
-// /* =====================
-//    Start MongoDB
-// ===================== */
-// async function run() {
-//   try {
-//     await client.connect()
-//     const db = client.db('LocalChefBazzaarBD')
-//     usersCollection = db.collection('users')
-//     mealsCollection = db.collection('meals')
-//     ordersCollection = db.collection('orders')
-//     reviewsCollection = db.collection('mealsReviews')
-//     favoritesCollection = db.collection('favorites')
-//     requestsCollection = db.collection('requests')
-
-//     console.log('MongoDB connected')
-
-//     /* =====================
-//        USER ROUTES
-//     ===================== */
-//     // Create or update user
-//     app.post('/user', async (req, res) => {
-//       const { email, name, profileImage, address } = req.body
-//       const user = await usersCollection.findOne({ email })
-
-//       if (user) {
-//         await usersCollection.updateOne(
-//           { email },
-//           { $set: { lastLoggedIn: new Date() } }
-//         )
-//         return res.send({ message: 'User already exists' })
-//       }
-
-//       const newUser = {
-//         name,
-//         email,
-//         profileImage,
-//         address,
-//         role: 'user',
-//         status: 'active',
-//         createdAt: new Date(),
-//         lastLoggedIn: new Date(),
-//       }
-
-//       const result = await usersCollection.insertOne(newUser)
-//       res.send(result)
-//     })
-
-//     // Get all users
-//     app.get('/users', async (req, res) => {
-//       const users = await usersCollection.find().toArray()
-//       res.send(users)
-//     })
-
-//     // Update role
-//     app.patch('/users/role', async (req, res) => {
-//       const { userId, role } = req.body
-//       if (!['user', 'chef', 'admin'].includes(role)) return res.status(400).send({ message: 'Invalid role' })
-
-//       const updateData = { role }
-//       if (role === 'chef') {
-//         updateData.chefId = 'chef-' + Math.floor(1000 + Math.random() * 9000)
-//       }
-
-//       const result = await usersCollection.updateOne(
-//         { _id: new ObjectId(userId) },
-//         { $set: updateData }
-//       )
-//       res.send(result)
-//     })
-
-//     // Make fraud
-//     app.patch('/users/fraud/:id', async (req, res) => {
-//       const id = req.params.id
-//       const result = await usersCollection.updateOne(
-//         { _id: new ObjectId(id) },
-//         { $set: { status: 'fraud' } }
-//       )
-//       res.send(result)
-//     })
-
-//     /* =====================
-//        MEALS
-//     ===================== */
-//     app.post('/meals', async (req, res) => {
-//       const meal = req.body
-//       const chef = await usersCollection.findOne({ email: meal.userEmail })
-//       if (chef?.status === 'fraud') return res.status(403).send({ message: 'Fraud chef cannot create meal' })
-
-//       const result = await mealsCollection.insertOne({ ...meal, createdAt: new Date() })
-//       res.send(result)
-//     })
-
-//     app.get('/meals', async (req, res) => {
-//       const page = parseInt(req.query.page) || 1
-//       const limit = 10
-//       const meals = await mealsCollection.find()
-//         .skip((page - 1) * limit)
-//         .limit(limit)
-//         .toArray()
-//       const total = await mealsCollection.countDocuments()
-//       res.send({ meals, total })
-//     })
-
-//     app.get('/meals/:id', async (req, res) => {
-//       const meal = await mealsCollection.findOne({ _id: new ObjectId(req.params.id) })
-//       res.send(meal)
-//     })
-
-//     /* =====================
-//        ORDERS
-//     ===================== */
-//     app.post('/orders', async (req, res) => {
-//       const order = req.body
-//       const user = await usersCollection.findOne({ email: order.userEmail })
-//       if (user?.status === 'fraud') return res.status(403).send({ message: 'Fraud user cannot order' })
-
-//       const result = await ordersCollection.insertOne({ ...order, orderTime: new Date(), orderStatus: 'pending', paymentStatus: 'Pending' })
-//       res.send(result)
-//     })
-
-//     app.get('/orders', async (req, res) => {
-//       const email = req.query.email
-//       const orders = await ordersCollection.find({ userEmail: email }).toArray()
-//       res.send(orders)
-//     })
-
-//     app.patch('/orders/:id', async (req, res) => {
-//       const { orderStatus } = req.body
-//       const result = await ordersCollection.updateOne(
-//         { _id: new ObjectId(req.params.id) },
-//         { $set: { orderStatus } }
-//       )
-//       res.send(result)
-//     })
-
-//     /* =====================
-//        REVIEWS
-//     ===================== */
-//     app.post('/reviews', async (req, res) => {
-//       const review = { ...req.body, date: new Date() }
-//       const result = await reviewsCollection.insertOne(review)
-//       res.send(result)
-//     })
-
-//     app.get('/reviews/:mealId', async (req, res) => {
-//       const mealId = req.params.mealId
-//       const reviews = await reviewsCollection.find({ foodId: mealId }).toArray()
-//       res.send(reviews)
-//     })
-
-//     /* =====================
-//        FAVORITES
-//     ===================== */
-//     app.post('/favorites', async (req, res) => {
-//       const { userEmail, mealId } = req.body
-//       const exists = await favoritesCollection.findOne({ userEmail, mealId })
-//       if (exists) return res.send({ message: 'Already in favorites' })
-
-//       const result = await favoritesCollection.insertOne({ ...req.body, addedTime: new Date() })
-//       res.send(result)
-//     })
-
-//     app.get('/favorites', async (req, res) => {
-//       const email = req.query.email
-//       const favorites = await favoritesCollection.find({ userEmail: email }).toArray()
-//       res.send(favorites)
-//     })
-
-//     app.delete('/favorites/:id', async (req, res) => {
-//       const result = await favoritesCollection.deleteOne({ _id: new ObjectId(req.params.id) })
-//       res.send(result)
-//     })
-
-//     /* =====================
-//        REQUESTS (Become Chef/Admin)
-//     ===================== */
-//     app.post('/requests', async (req, res) => {
-//       const request = { ...req.body, requestStatus: 'pending', requestTime: new Date() }
-//       const result = await requestsCollection.insertOne(request)
-//       res.send(result)
-//     })
-
-//     app.get('/requests', async (req, res) => {
-//       const requests = await requestsCollection.find().toArray()
-//       res.send(requests)
-//     })
-
-//     app.patch('/requests/:id/approve', async (req, res) => {
-//       const request = await requestsCollection.findOne({ _id: new ObjectId(req.params.id) })
-//       let updateRole = {}
-//       if (request.requestType === 'chef') {
-//         updateRole = { role: 'chef', chefId: 'chef-' + Math.floor(1000 + Math.random() * 9000) }
-//       }
-//       if (request.requestType === 'admin') {
-//         updateRole = { role: 'admin' }
-//       }
-
-//       await usersCollection.updateOne({ email: request.userEmail }, { $set: updateRole })
-//       const result = await requestsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { requestStatus: 'approved' } })
-//       res.send(result)
-//     })
-
-//     app.patch('/requests/:id/reject', async (req, res) => {
-//       const result = await requestsCollection.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { requestStatus: 'rejected' } })
-//       res.send(result)
-//     })
-
-//     /* =====================
-//        STRIPE PAYMENT
-//     ===================== */
-//     app.post('/create-checkout-session', async (req, res) => {
-//       const { price, quantity, customerEmail, mealName } = req.body
-//       const session = await stripe.checkout.sessions.create({
-//         payment_method_types: ['card'],
-//         mode: 'payment',
-//         customer_email: customerEmail,
-//         line_items: [
-//           { price_data: { currency: 'usd', product_data: { name: mealName }, unit_amount: Math.round(price * 100) }, quantity }
-//         ],
-//         success_url: `${process.env.CLIENT_DOMAIN}/payment-success`,
-//         cancel_url: `${process.env.CLIENT_DOMAIN}/order`,
-//       })
-//       res.send({ url: session.url })
-//     })
-
-//     app.get('/', (req, res) => res.send('Server is running...'))
-
-//   } catch (err) {
-//     console.error(err)
-//   }
-// }
-
-// run().catch(console.dir)
-
-// app.listen(port, () => console.log(`🚀 Server running on port ${port}`))
