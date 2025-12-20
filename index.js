@@ -450,11 +450,24 @@ async function run() {
     // });
 
     app.get("/orders/:id", async (req, res) => {
-  const order = await order.findById(req.params.id);
-  if (!order) return res.status(404).send("Order not found");
-  res.json(order);
-});
+      try {
+        const id = req.params.id;
 
+        // Validate ObjectId
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid order ID" });
+        }
+
+        const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        res.json(order);
+      } catch (err) {
+        console.error("Error fetching order:", err);
+        res.status(500).json({ message: "Internal server error" });
+      }
+    });
 
     // get users order
     app.get("/orders/by-user/:email", verifyFBToken, async (req, res) => {
