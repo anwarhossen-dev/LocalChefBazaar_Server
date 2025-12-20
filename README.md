@@ -125,7 +125,6 @@ CORS
 
 Create a .env file in the root directory:
 
-PORT=3000
 CLIENT_DOMAIN=https://localchefbazaar-612c0.web.app
 
 STRIPE_SECRET_KEY=your_stripe_secret_key
