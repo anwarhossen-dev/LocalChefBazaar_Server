@@ -5,7 +5,8 @@ const cors = require('cors')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const admin = require('firebase-admin')
 const serviceAccount = require("./serviceAccountKey.json");
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+//const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb'); // ✅ এটাই যথেষ্ট
 
 
 const port = process.env.PORT || 3000
@@ -39,14 +40,28 @@ const verifyFBToken = async (req, res, next) => {
 }
 
 const app = express()
+
+
 // middleware
+
+// app.use(
+//   cors({
+//     origin: [process.env.CLIENT_DOMAIN || "http://localhost:5173"],
+//     credentials: true,
+//     optionSuccessStatus: 200,
+//   })
+// )
+
 app.use(
   cors({
-    origin: [process.env.CLIENT_DOMAIN],
+    origin: [
+      process.env.CLIENT_DOMAIN || "http://localhost:5173",
+    ],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // ✅ এটা যোগ করো
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
-    optionSuccessStatus: 200,
   })
-)
+);
 app.use(express.json())
 
 
@@ -269,6 +284,7 @@ async function run() {
       const result = await mealsCollection.findOne({ _id: new ObjectId(id) });
       res.send(result);
     });
+
     // get meals by email
     app.get("/meals/by-email/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
@@ -324,18 +340,29 @@ async function run() {
       const reviews = await reviewsCollection.find({ foodId: mealId }).toArray();
       res.send(reviews);
     });
-    app.get("/reviews", async (req, res) => {
-      const review = await reviewsCollection.find().sort({ date: -1 }).limit(10).toArray();
-      res.send(review);
-    });
-    app.get("/reviews/by-email/:email", verifyFBToken, async (req, res) => {
-      const email = req.params.email;
-      if (req.decoded_email !== email) {
-        return res.status(403).send({ error: "Access Denied" });
-      }
-      const result = await reviewsCollection.find({ reviewerEmail: email }).toArray();
-      res.send(result);
-    });
+    // app.get("/reviews", async (req, res) => {
+    //   const review = await reviewsCollection.find().sort({ date: -1 }).limit(10).toArray();
+    //   res.send(review);
+    // });
+    // app.get("/reviews/by-email/:email", verifyFBToken, async (req, res) => {
+    //   const email = req.params.email;
+    //   if (req.decoded_email !== email) {
+    //     return res.status(403).send({ error: "Access Denied" });
+    //   }
+    //   const result = await reviewsCollection.find({ reviewerEmail: email }).toArray();
+    //   res.send(result);
+    // });
+
+    // ✅ Public route — no auth needed
+app.get("/reviews", async (req, res) => {
+  try {
+    const result = await reviewsCollection.find().toArray();
+    res.send(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ error: "Failed to fetch reviews" });
+  }
+});
     app.delete("/reviews/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const review = await reviewsCollection.findOne({ _id: new ObjectId(id) });
@@ -632,7 +659,7 @@ async function run() {
       }
       res.send({ success: false });
     });
-    const { ObjectId } = require("mongodb");
+   // const { ObjectId } = require("mongodb");
 
     // Delete an order by ID
     app.delete("/orders/:id", verifyFBToken, async (req, res) => {
