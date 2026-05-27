@@ -1,1 +1,22 @@
-{ "version": 2, "builds": [ { "src": "index.js", "use": "@vercel/node" } ], "routes": [ { "src": "/(.*)", "dest": "index.js", "methods": [ "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS" ] } ] }
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "index.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "index.js",
+      "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      "headers": {
+        "Access-Control-Allow-Origin": "https://local-chef-bazaar-pied.vercel.app",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Allow-Credentials": "true"
+      }
+    }
+  ]
+}
