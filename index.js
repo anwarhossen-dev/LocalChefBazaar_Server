@@ -2,22 +2,35 @@
 require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
-const admin = require('firebase-admin')
-const serviceAccount = require("./serviceAccountKey.json");
-//const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb'); // ✅ এটাই যথেষ্ট
 
+let stripe;
+if (process.env.STRIPE_SECRET_KEY) {
+  stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+} else {
+  console.warn("WARNING: STRIPE_SECRET_KEY is missing. Payment routes will fail.");
+}
+
+const admin = require('firebase-admin')
+
+// Initialize Firebase safely - handles both local file and environment variable for Vercel
+try {
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT 
+    ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) 
+    : require("./serviceAccountKey.json");
+
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+    });
+  }
+} catch (error) {
+  console.error("Firebase Initialization Error:", error.message);
+}
+
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb'); 
 
 const port = process.env.PORT || 3000
 const crypto = require("crypto");
-
-//const serviceAccount = JSON.parse(decoded)
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-})
-
-
 const verifyFBToken = async (req, res, next) => {
   const token = req.headers.authorization;
 
@@ -84,7 +97,7 @@ async function run() {
     const db = client.db("LocalChefBazzaarBD");
     const usersCollection = db.collection("users");
     const requestsCollection = db.collection("requests");
-    const mealsCollection = db.collection("meals")
+    mealsCollection = db.collection("meals"); // Assign to the outer variable instead of shadowing
     const reviewsCollection = db.collection("reviews")
     const favouriteCollection = db.collection("favourites")
     const ordersCollection = db.collection("orders")
@@ -224,7 +237,11 @@ async function run() {
       const id = req.params.id;
       const { requestStatus, userEmail, requestType } = req.body;
 
-      const requestUpdate = await requestsCollection.updateOne({ _id: id }, { $set: { requestStatus } });
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({ success: false, message: "Invalid ID format" });
+      }
+
+      const requestUpdate = await requestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { requestStatus } });
 
       if (requestUpdate.modifiedCount === 0) {
         return res.send({ success: false, message: "Request update failed" });
@@ -264,10 +281,24 @@ async function run() {
         res.status(500).send({ success: false, error: "Failed to creat meal" });
       }
     });
-    // get meals to show on home page
-    app.get("/leatestMeals", async (req, res) => {
-      const meals = await mealsCollection.find().sort({ createdAt: -1 }).limit(8).toArray();
-      res.send(meals);
+    // // get meals to show on home page
+    // app.get("/latestMeals", async (req, res) => {
+    //   const meals = await mealsCollection.find().sort({ createdAt: -1 }).limit(8).toArray();
+    //   res.send(meals);
+    // });
+
+    // app.get("/LatestMeal", async (req, res) => {
+    //   const meals = await mealsCollection.find().sort({ createdAt: -1 }).limit(8).toArray();
+    //   res.send(meals);
+    // });
+
+        app.get("/leatestMeals", async (req, res) => {
+      try {
+        const meals = await mealsCollection.find().sort({ createdAt: -1 }).limit(8).toArray();
+        res.send(meals);
+      } catch (err) {
+        res.status(500).send({ error: "Failed to fetch meals" });
+      }
     });
     // Show meals Pagination
     app.get("/meals", async (req, res) => {
@@ -432,7 +463,7 @@ app.get("/reviews", async (req, res) => {
       const result = await favouriteCollection.insertOne(favourite);
       res.send({
         success: true,
-        insertedId: result.insertedIdz,
+        insertedId: result.insertedId,
       });
     });
     app.get("/favorites/:email", verifyFBToken, async (req, res) => {
@@ -580,6 +611,10 @@ app.get("/reviews", async (req, res) => {
 
     // --------------------Payment api-----------------
     app.post("/order-payment-checkout", verifyFBToken, async (req, res) => {
+      if (!stripe) {
+        return res.status(500).send({ error: "Stripe is not configured on the server." });
+      }
+
       const info = req.body;
       const amount = parseInt(info.price) * 100;
 
@@ -616,6 +651,10 @@ app.get("/reviews", async (req, res) => {
       const { sessionId } = req.query;
       if (!sessionId) return res.status(400).json({ error: 'Session ID is required' });
 
+      if (!stripe) {
+        return res.status(500).send({ error: "Stripe is not configured on the server." });
+      }
+
       try {
         // Lookup payment session in Stripe or database
         const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -627,6 +666,10 @@ app.get("/reviews", async (req, res) => {
     });
 
     app.patch("/order-payment-success", verifyFBToken, async (req, res) => {
+      if (!stripe) {
+        return res.status(500).send({ error: "Stripe is not configured on the server." });
+      }
+
       const sessionId = req.query.session_id;
       const session = await stripe.checkout.sessions.retrieve(sessionId);
       const transactionId = session.payment_intent;
