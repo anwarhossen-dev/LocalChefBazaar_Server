@@ -892,6 +892,27 @@ const verifyFBToken = async (req, res, next) => {
     });
   }
 };
+
+// Global middleware to verify admin users (does not rely on in-function variables)
+const verifyAdmin = async (req, res, next) => {
+  try {
+    const requesterEmail = req.decoded_email || req.email;
+    if (!requesterEmail) return res.status(401).send({ error: "Unauthorized" });
+
+    const db = client.db("LocalChefBazzaarBD");
+    const users = db.collection("users");
+
+    const requester = await users.findOne({ email: requesterEmail });
+    if (!requester || requester.role !== "admin")
+      return res.status(403).send({ error: "Forbidden" });
+
+    next();
+  } catch (error) {
+    console.error("verifyAdmin Error:", error);
+    res.status(500).send({ error: error.message });
+  }
+};
+
 // ───────────────────────────── DB + API ─────────────────────────────
 async function run() {
   await client.connect();
@@ -903,23 +924,7 @@ async function run() {
   const reviews = db.collection("reviews");
   const payments = db.collection("payments");
   const requests = db.collection("requests");
-
-  // Middleware to verify admin users (requires verifyFBToken to set req.decoded_email)
-  const verifyAdmin = async (req, res, next) => {
-    try {
-      const requesterEmail = req.decoded_email || req.email;
-      if (!requesterEmail) return res.status(401).send({ error: "Unauthorized" });
-
-      const requester = await users.findOne({ email: requesterEmail });
-      if (!requester || requester.role !== "admin")
-        return res.status(403).send({ error: "Forbidden" });
-
-      next();
-    } catch (error) {
-      console.error("verifyAdmin Error:", error);
-      res.status(500).send({ error: error.message });
-    }
-  };
+  const Contacts = db.collection("Contacts");
 
   // ================= USERS =================
   // app.post("/users", async (req, res) => {
