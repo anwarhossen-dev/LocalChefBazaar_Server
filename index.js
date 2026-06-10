@@ -867,9 +867,36 @@ const client = new MongoClient(uri, {
 // };
 
 
+// const verifyFBToken = async (req, res, next) => {
+//   try {
+//     const authHeader = req.headers.authorization;
+
+//     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+//       return res.status(401).send({
+//         error: "Unauthorized Access",
+//       });
+//     }
+
+//     const token = authHeader.split(" ")[1];
+
+//     const decoded = await admin.auth().verifyIdToken(token);
+
+//     req.decoded_email = decoded.email;
+
+//     next();
+//   } catch (error) {
+//     console.error("verifyFBToken Error:", error);
+
+//     return res.status(401).send({
+//       error: "Unauthorized Access",
+//     });
+//   }
+// };
 const verifyFBToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
+
+    console.log("Authorization Header:", authHeader);
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       return res.status(401).send({
@@ -880,6 +907,8 @@ const verifyFBToken = async (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     const decoded = await admin.auth().verifyIdToken(token);
+
+    console.log("Decoded Email:", decoded.email);
 
     req.decoded_email = decoded.email;
 
@@ -894,22 +923,52 @@ const verifyFBToken = async (req, res, next) => {
 };
 
 // Global middleware to verify admin users (does not rely on in-function variables)
+// const verifyAdmin = async (req, res, next) => {
+//   try {
+//     const requesterEmail = req.decoded_email || req.email;
+//     if (!requesterEmail) return res.status(401).send({ error: "Unauthorized" });
+
+//     const db = client.db("LocalChefBazzaarBD");
+//     const users = db.collection("users");
+
+//     const requester = await users.findOne({ email: requesterEmail });
+//     if (!requester || requester.role !== "admin")
+//       return res.status(403).send({ error: "Forbidden" });
+
+//     next();
+//   } catch (error) {
+//     console.error("verifyAdmin Error:", error);
+//     res.status(500).send({ error: error.message });
+//   }
+// };
+
 const verifyAdmin = async (req, res, next) => {
   try {
-    const requesterEmail = req.decoded_email || req.email;
-    if (!requesterEmail) return res.status(401).send({ error: "Unauthorized" });
+    const requesterEmail = req.decoded_email;
 
-    const db = client.db("LocalChefBazzaarBD");
-    const users = db.collection("users");
+    if (!requesterEmail) {
+      return res.status(401).send({
+        error: "Unauthorized",
+      });
+    }
 
-    const requester = await users.findOne({ email: requesterEmail });
-    if (!requester || requester.role !== "admin")
-      return res.status(403).send({ error: "Forbidden" });
+    const requester = await users.findOne({
+      email: requesterEmail,
+    });
+
+    if (!requester || requester.role !== "admin") {
+      return res.status(403).send({
+        error: "Forbidden",
+      });
+    }
 
     next();
   } catch (error) {
     console.error("verifyAdmin Error:", error);
-    res.status(500).send({ error: error.message });
+
+    res.status(500).send({
+      error: error.message,
+    });
   }
 };
 
@@ -967,13 +1026,173 @@ async function run() {
   // });
 
 
-  app.get("/users/:email", verifyFBToken, async (req, res) => {
+//   app.get("/users/:email", verifyFBToken, async (req, res) => {
+//   try {
+//     const requesterEmail = req.decoded_email;
+//     const targetEmail = req.params.email;
+
+//     console.log("Requester:", requesterEmail);
+//     console.log("Target:", targetEmail);
+
+//     if (requesterEmail !== targetEmail) {
+//       const requester = await users.findOne({
+//         email: requesterEmail,
+//       });
+
+//       if (!requester || requester.role !== "admin") {
+//         return res.status(403).send({
+//           error: "Forbidden",
+//         });
+//       }
+//     }
+
+//     const user = await users.findOne({
+//       email: targetEmail,
+//     });
+
+//     if (!user) {
+//       return res.status(404).send({
+//         error: "User not found",
+//       });
+//     }
+
+//     res.send(user);
+//   } catch (error) {
+//     console.error(error);
+
+//     res.status(500).send({
+//       error: error.message,
+//     });
+//   }
+// });
+
+app.get("/users/:email/role", verifyFBToken, async (req, res) => {
   try {
     const requesterEmail = req.decoded_email;
     const targetEmail = req.params.email;
 
-    console.log("Requester:", requesterEmail);
-    console.log("Target:", targetEmail);
+    if (requesterEmail !== targetEmail) {
+      const requester = await users.findOne({
+        email: requesterEmail,
+      });
+
+      if (!requester || requester.role !== "admin") {
+        return res.status(403).send({
+          error: "Forbidden",
+        });
+      }
+    }
+
+    const user = await users.findOne({
+      email: targetEmail,
+    });
+
+    res.send({
+      role: user?.role || "user",
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send({
+      error: error.message,
+    });
+  }
+});
+  // Admin-only: set role for a user
+  // app.patch("/users/role/:email", verifyFBToken, async (req, res) => {
+  //   try {
+  //     const requesterEmail = req.email;
+  //     const requester = await users.findOne({ email: requesterEmail });
+  //     if (!requester || requester.role !== "admin")
+  //       return res.status(403).send({ error: "Forbidden" });
+
+  //     const targetEmail = req.params.email;
+  //     const { role } = req.body;
+  //     if (!role) return res.status(400).send({ error: "Missing role" });
+
+  //     const result = await users.updateOne(
+  //       { email: targetEmail },
+  //       { $set: { role } }
+  //     );
+  //     res.send({ success: result.modifiedCount > 0 });
+  //   } catch (err) {
+  //     res.status(500).send({ error: err.message });
+  //   }
+  // });
+
+//   app.get("/users/:email/role", verifyFBToken, async (req, res) => {
+//   try {
+//     const requesterEmail = req.decoded_email;
+//     const targetEmail = req.params.email;
+
+//     if (requesterEmail !== targetEmail) {
+//       const requester = await users.findOne({
+//         email: requesterEmail,
+//       });
+
+//       if (!requester || requester.role !== "admin") {
+//         return res.status(403).send({
+//           error: "Forbidden",
+//         });
+//       }
+//     }
+
+//     const user = await users.findOne({
+//       email: targetEmail,
+//     });
+
+//     res.send({
+//       role: user?.role || "user",
+//     });
+//   } catch (error) {
+//     res.status(500).send({
+//       error: error.message,
+//     });
+//   }
+// });
+
+
+app.get(
+  "/api/users",
+  verifyFBToken,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const list = await users
+        .find()
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(list);
+    } catch (error) {
+      res.status(500).send({
+        error: error.message,
+      });
+    }
+  }
+);
+  // --- API-prefixed aliases for frontend proxies ---
+  // app.get("/api/users", verifyFBToken, verifyAdmin, async (req, res) => {
+  //   try {
+  //     const list = await users.find().sort({ createdAt: -1 }).toArray();
+  //     res.send(list);
+  //   } catch (err) {
+  //     res.status(500).send({ error: err.message });
+  //   }
+  // });
+
+  app.get("/api/users/:email", verifyFBToken, async (req, res) => {
+  try {
+    const requesterEmail = req.decoded_email;
+    const targetEmail = req.params.email;
+
+    console.log(
+      "GET USER =>",
+      "Requester:",
+      requesterEmail,
+      "Target:",
+      targetEmail
+    );
 
     if (requesterEmail !== targetEmail) {
       const requester = await users.findOne({
@@ -1006,89 +1225,65 @@ async function run() {
     });
   }
 });
-  // Admin-only: set role for a user
-  // app.patch("/users/role/:email", verifyFBToken, async (req, res) => {
+
+  // app.get("/api/users/:email", verifyFBToken, async (req, res) => {
   //   try {
   //     const requesterEmail = req.email;
-  //     const requester = await users.findOne({ email: requesterEmail });
-  //     if (!requester || requester.role !== "admin")
-  //       return res.status(403).send({ error: "Forbidden" });
-
   //     const targetEmail = req.params.email;
-  //     const { role } = req.body;
-  //     if (!role) return res.status(400).send({ error: "Missing role" });
+  //     console.log("GET /api/users/:email - requester:", requesterEmail, "target:", targetEmail);
 
-  //     const result = await users.updateOne(
-  //       { email: targetEmail },
-  //       { $set: { role } }
-  //     );
-  //     res.send({ success: result.modifiedCount > 0 });
+  //     if (requesterEmail !== targetEmail) {
+  //       const requester = await users.findOne({ email: requesterEmail });
+  //       if (!requester || requester.role !== "admin")
+  //         return res.status(403).send({ error: "Forbidden" });
+  //     }
+
+  //     const user = await users.findOne({ email: targetEmail });
+  //     if (!user) return res.status(404).send({ error: "User not found" });
+  //     res.send(user);
   //   } catch (err) {
   //     res.status(500).send({ error: err.message });
   //   }
   // });
 
-  app.get("/users/:email/role", verifyFBToken, async (req, res) => {
-  try {
-    const requesterEmail = req.decoded_email;
-    const targetEmail = req.params.email;
+  app.patch(
+  "/api/users/role/:email",
+  verifyFBToken,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const targetEmail = req.params.email;
+      const { role } = req.body;
 
-    if (requesterEmail !== targetEmail) {
-      const requester = await users.findOne({
-        email: requesterEmail,
-      });
-
-      if (!requester || requester.role !== "admin") {
-        return res.status(403).send({
-          error: "Forbidden",
+      if (!role) {
+        return res.status(400).send({
+          error: "Role is required",
         });
       }
+
+      const result = await users.updateOne(
+        {
+          email: targetEmail,
+        },
+        {
+          $set: {
+            role,
+          },
+        }
+      );
+
+      res.send({
+        success: result.modifiedCount > 0,
+      });
+    } catch (error) {
+      console.error(error);
+
+      res.status(500).send({
+        error: error.message,
+      });
     }
-
-    const user = await users.findOne({
-      email: targetEmail,
-    });
-
-    res.send({
-      role: user?.role || "user",
-    });
-  } catch (error) {
-    res.status(500).send({
-      error: error.message,
-    });
   }
-});
-
-  // --- API-prefixed aliases for frontend proxies ---
-  app.get("/api/users", verifyFBToken, verifyAdmin, async (req, res) => {
-    try {
-      const list = await users.find().sort({ createdAt: -1 }).toArray();
-      res.send(list);
-    } catch (err) {
-      res.status(500).send({ error: err.message });
-    }
-  });
-
-  app.get("/api/users/:email", verifyFBToken, async (req, res) => {
-    try {
-      const requesterEmail = req.email;
-      const targetEmail = req.params.email;
-      console.log("GET /api/users/:email - requester:", requesterEmail, "target:", targetEmail);
-
-      if (requesterEmail !== targetEmail) {
-        const requester = await users.findOne({ email: requesterEmail });
-        if (!requester || requester.role !== "admin")
-          return res.status(403).send({ error: "Forbidden" });
-      }
-
-      const user = await users.findOne({ email: targetEmail });
-      if (!user) return res.status(404).send({ error: "User not found" });
-      res.send(user);
-    } catch (err) {
-      res.status(500).send({ error: err.message });
-    }
-  });
-
+);
   app.get("/api/users/:email/role", verifyFBToken, async (req, res) => {
     try {
       const user = await users.findOne({ email: req.params.email });
@@ -1124,6 +1319,44 @@ async function run() {
     const data = await meals.find().toArray();
     res.send(data);
   });
+
+  // // latest meals (most recent 8)
+  // app.get("/latestMeals", async (req, res) => {
+  //   try {
+  //     const list = await meals.find().sort({ createdAt: -1 }).limit(8).toArray();
+  //     res.send(list);
+  //   } catch (err) {
+  //     res.status(500).send({ error: err.message });
+  //   }
+  // });
+
+  // // single latest meal (most recent)
+  // app.get("/latestMeal", async (req, res) => {
+  //   try {
+  //     const list = await meals.find().sort({ createdAt: -1 }).limit(1).toArray();
+  //     res.send(list[0] || null);
+  //   } catch (err) {
+  //     res.status(500).send({ error: err.message });
+  //   }
+  // });
+
+  app.get("/latestMeals", async (req, res) => {
+  try {
+    const result = await meals
+      .find({})
+      .sort({ _id: -1 })
+      .limit(8)
+      .toArray();
+
+    res.send(result);
+  } catch (error) {
+    console.error("Latest Meals Error:", error);
+    res.status(500).send({
+      success: false,
+      message: error.message,
+    });
+  }
+});
 
   // ================= REQUESTS =================
   app.post("/requests", verifyFBToken, async (req, res) => {
