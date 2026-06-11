@@ -751,9 +751,46 @@
 //       } catch { res.status(500).send({ deliveredOrders: 0 }); }
 //     });
 
+    
+//   // ================= MEALS =================
+//   app.get("/meals", async (req, res) => {
+//     const data = await meals.find().toArray();
+//     res.send(data);
+//   });
+
+//   // // latest meals (most recent 8)
+//   // app.get("/latestMeals", async (req, res) => {
+//   //   try {
+//   //     const list = await meals.find().sort({ createdAt: -1 }).limit(8).toArray();
+//   //     res.send(list);
+//   //   } catch (err) {
+//   //     res.status(500).send({ error: err.message });
+//   //   }
+//   // });
+
+
+//   app.get("/latestMeals", async (req, res) => {
+//   try {
+//     const result = await meals
+//       .find({})
+//       .sort({ _id: -1 })
+//       .limit(8)
+//       .toArray();
+
+//     res.send(result);
+//   } catch (error) {
+//     console.error("Latest Meals Error:", error);
+//     res.status(500).send({
+//       success: false,
+//       message: error.message,
+//     });
+//   }
+// });
+
 //     // ════════════════════════════════════════════════════════════════════════
 //     // CONTACT
 //     // ════════════════════════════════════════════════════════════════════════
+    
 
 //     app.post("/contact", async (req, res) => {
 //       try {
@@ -773,14 +810,6 @@
 //     console.error("❌ Startup Error:", error);
 //   }
 // }
-
-// run().catch(console.dir);
-
-// app.get("/", (req, res) => res.send("🍽️ LocalChef Bazaar Server Running"));
-
-// app.listen(port, () => console.log(`🚀 Server on port ${port}`));
-
-
 
 /* cspell:disable */
 require("dotenv").config();
@@ -979,9 +1008,82 @@ async function run() {
 
   const users = db.collection("users");
   const meals = db.collection("meals");
+
+  // latest single meal
+  app.get("/latestMeal", async (req, res) => {
+    try {
+      const item = await meals.find().sort({ createdAt: -1 }).limit(1).toArray();
+      res.send(item[0] || null);
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
   const orders = db.collection("orders");
   const reviews = db.collection("reviews");
   const payments = db.collection("payments");
+
+  // Admin: list payments
+  app.get("/payments", verifyFBToken, verifyAdmin, async (req, res) => {
+    try {
+      const list = await payments.find().sort({ createdAt: -1 }).toArray();
+      res.send(list);
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
+  const favouriteCollection = db.collection("favourites");
+
+  // FAVOURITES
+  app.post("/favorites", verifyFBToken, async (req, res) => {
+    try {
+      const fav = req.body;
+      const exists = await favouriteCollection.findOne({ userEmail: fav.userEmail, mealId: fav.mealId });
+      if (exists) return res.send({ success: false, message: "Already in favorites" });
+      fav.addedTime = new Date();
+      const result = await favouriteCollection.insertOne(fav);
+      res.send({ success: true, insertedId: result.insertedId });
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
+  app.get("/favorites/:email", verifyFBToken, async (req, res) => {
+    try {
+      const result = await favouriteCollection.find({ userEmail: req.params.email }).toArray();
+      res.send(result);
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
+  // Alias and convenience: GET /favourites
+  // Supports optional query ?email=<email> to filter by user
+  app.get("/favourites", async (req, res) => {
+    try {
+      const email = req.query.email;
+      if (email) {
+        const list = await favouriteCollection.find({ userEmail: email }).toArray();
+        return res.send(list);
+      }
+      const all = await favouriteCollection.find().toArray();
+      res.send(all);
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
+  app.delete("/favourites/:id", verifyFBToken, async (req, res) => {
+    try {
+      if (!ObjectId.isValid(req.params.id)) return res.status(400).send({ error: "Invalid ID" });
+      const result = await favouriteCollection.deleteOne({ _id: new ObjectId(req.params.id) });
+      res.send({ success: result.deletedCount > 0 });
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
   const requests = db.collection("requests");
   const Contacts = db.collection("Contacts");
 
@@ -1482,6 +1584,27 @@ app.get(
 
     const result = await reviews.insertOne(review);
     res.send(result);
+  });
+
+  // Public: list recent reviews
+  app.get("/reviews", async (req, res) => {
+    try {
+      const list = await reviews.find().sort({ createdAt: -1 }).limit(20).toArray();
+      res.send(list);
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
+  });
+
+  // Reviews for a specific meal
+  app.get("/reviews/:mealId", async (req, res) => {
+    try {
+      const mealId = req.params.mealId;
+      const list = await reviews.find({ foodId: mealId }).sort({ createdAt: -1 }).toArray();
+      res.send(list);
+    } catch (err) {
+      res.status(500).send({ error: err.message });
+    }
   });
 
   // ================= START =================
